@@ -1,0 +1,704 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="initial-scale=1,maximum-scale=1,user-scalable=no"
+    />
+    <title>
+    City of Ottawa E-Scooters
+    </title>
+    <style>
+      html,
+      body,
+      #viewDiv {
+        padding: 0;
+        margin: 0;
+        height: 100%;
+        width: 100%;
+      }
+      #actions {
+        padding: 5px;
+		width:320px
+      }
+	  #btns {
+		  display: flex;		  
+		  margin-bottom: 5px;
+		  padding-bottom: 5px;
+		  border-bottom: gray;
+		  border-bottom-style: solid;
+	  }
+	  #bird_data, #lime_data, #roll_data{
+		  background-color: whitesmoke;
+	  }
+	  #add_lime, #add_bird, #add_roll{
+		  margin-left: 5px;
+		  width: 75px;
+	  }
+	  #bnd_chk,  #ref_bird, #ref_lime, .refresh-time{
+		margin:auto;
+	  }
+	  .refresh-time{
+		  margin-left: 5px;
+		  position:relative;		  
+	  }
+	  .refresh-time:hover p.tip{
+		  opacity:1;
+		  top: -2rem;		  
+	  }
+	  .refresh-time p.tip{
+		  opacity: 0;
+		  user-select: none;
+		  pointer-events: none;
+		  position: absolute;
+		  left: 0;
+		  top: -1.6rem;
+		  font-size: .6rem;
+		  padding: .4rem;
+		  border-radius: .1rem;
+		  background-color:bisque; 
+		  color:black;
+		  width: max-content;
+		  transition: opacity .2s, top .2s;
+	  }
+      button:disabled {
+        opacity: 0.4;
+        -moz-opacity: 0.4; /* Firefox and Mozilla browsers */
+        -webkit-opacity: 0.4; /* Safari */
+        cursor: default;
+      }
+    </style>
+
+    <link
+      rel="stylesheet"
+      href="https://js.arcgis.com/4.16/esri/themes/light/main.css"
+    />
+    <script src="https://js.arcgis.com/4.16/"></script>
+
+    <script>
+      require([
+        "esri/Map",
+        "esri/views/MapView",
+        "esri/layers/FeatureLayer",
+        "esri/Graphic",
+		"esri/geometry/Point"
+      ], function (
+        Map,
+        MapView,
+        FeatureLayer,
+        Graphic,
+		Point
+      ) {
+
+		const LIME = "https://data.lime.bike/api/partners/v1/gbfs/ottawa/free_bike_status.json"; //"http://khibma.azurewebsites.net/escooter/lime.json"; //
+		const BIRD = "https://mds.bird.co/gbfs/platform-partner/birdcanada/ottawa/free_bike_status.json"; //"http://khibma.azurewebsites.net/escooter/bird.json"; // 
+		const ROLL = "https://data.rollapi.com/v1/gbfs/ottawa/free_bike_status.json";
+		const proxyurl = "https://cors-anywhere.herokuapp.com/";
+		const boundary = "https://services1.arcgis.com/vY6WuhLW0HkFe6Fl/arcgis/rest/services/OttawaScooterBoundaries/FeatureServer/0";
+		
+		const bikeSymbol = {
+			0: { //available				
+				type: "simple-marker",
+				color: [34,139,34],
+				outline: {
+					color: [50,205,50],
+					width: 2
+				}
+			},
+			1: { //disabled				
+				type: "simple-marker", 
+				color: [247,5,5],
+				outline: {					
+					color: [252,171,101],
+					width: 2
+				}
+			},
+			2: { //reserved				
+				type: "simple-marker", 
+				color: [204,204,0],
+				outline: {					
+					color: [255,255,0],
+					width: 2
+				}				
+			}
+		}
+
+		let renderer = {
+			type: "unique-value",  // autocasts as new UniqueValueRenderer()
+			field: "is_disabled",
+			field2: "is_reserved",
+			fieldDelimiter: ", ",  // comma + space used to separate values from all fields
+			uniqueValueInfos: [{
+				value: "0, 0",  
+				symbol: bikeSymbol[0] 
+				}, {
+				value: "1, 0",  
+				symbol: bikeSymbol[1]  
+				}, {
+				value: "0, 1",  
+				symbol: bikeSymbol[2]  
+				}]
+		};
+
+		const f = [{
+					name:"bike_id",
+					type:"string"
+				}, {
+					name:"is_disabled",
+					type:"integer"
+				}, {
+					name:"is_reserved",
+					type:"integer"
+				}]
+		const fi = [{
+					fieldName: "bike_id"
+				}, {
+					fieldName: "is_disabled"
+				}, {
+					fieldName: "is_reserved"
+				}]
+
+		let limeLayer = new FeatureLayer({
+			fields: f,
+			objectIdField: "bike_id", 
+  			geometryType: "point", 
+   			spatialReference: { wkid: 4326 },
+			source:[],
+			popupTemplate: {
+				title: "Lime: {bike_id}",
+				content: [{
+						type: "fields",
+						fieldInfos: fi
+					}]
+			},
+			renderer: renderer 
+		});
+
+		let birdLayer = new FeatureLayer({
+			fields: f,
+			objectIdField: "bike_id", 
+  			geometryType: "point", 
+			spatialReference: { wkid: 4326 },
+			source:[],
+			popupTemplate: {
+			title: "Bird: {bike_id}",
+			content: [{
+					type: "fields",
+					fieldInfos: fi
+				}]
+			},
+			renderer: renderer 
+		});
+
+		let rollLayer = new FeatureLayer({
+			fields: f,
+			objectIdField: "bike_id", 
+  			geometryType: "point", 
+			spatialReference: { wkid: 4326 },
+			source:[],
+			popupTemplate: {
+			title: "Roll: {bike_id}",
+			content: [{
+					type: "fields",
+					fieldInfos: fi
+				}]
+			},
+			renderer: renderer 
+		});
+
+		let limeBoundary = new FeatureLayer({
+			url: boundary,
+			id:"lime_boundary",
+			opacity: 0.7,
+			definitionExpression: "Name = 'Lime'"
+		});
+		let birdBoundary = new FeatureLayer({
+			url: boundary,
+			id:"bird_boundary",
+			opacity: 0.7,
+			definitionExpression: "Name = 'Bird'"
+		});
+		let rollBoundary = new FeatureLayer({
+			url: boundary,
+			id:"roll_boundary",
+			opacity: 0.7,
+			definitionExpression: "Name = 'Roll'"
+		});
+
+        const view = new MapView({
+          map: new Map({
+            basemap: "gray-vector"
+          }),
+          container: "viewDiv",
+          extent: {
+            spatialReference: {
+              wkid: 102100
+            },
+            xmin: -8430847.85,
+            ymin: 5684284.46,
+            xmax: -8420987.47,
+            ymax: 5690017.23
+          },
+          popup: {
+            dockEnabled: true,
+            dockOptions: {
+              position: "top-right",
+              breakpoint: false
+            }
+          }
+		});
+		
+		limeBoundary.visible = false;
+		birdBoundary.visible = false;
+		rollBoundary.visible = false;
+		limeLayer.visible = false;
+		birdLayer.visible = false;
+		rollLayer.visible = false;
+		
+		view.map.layers.addMany([limeBoundary, birdBoundary, rollBoundary, limeLayer, birdLayer, rollLayer]);
+
+		// Grab the geometry from the boundary layers to do intersect calcs
+		let limeBndGeom;
+		let birdBndGeom;
+		let rollBndGeom;
+
+		view.ui.add(document.getElementById("actions"), "top-right");
+
+		// Add / Remove Btns
+		const addLimeBtn = document.getElementById("add_lime");
+		const addBirdBtn = document.getElementById("add_bird");
+		const addRollBtn = document.getElementById("add_roll");
+		addLimeBtn.addEventListener("click", function(e) {
+			toggle("lime")
+		});
+		addBirdBtn.addEventListener("click", function(e) {
+			toggle("bird")
+		});
+		addRollBtn.addEventListener("click", function(e) {
+			toggle("roll")
+		});
+
+		// Refresh Buttons
+		const refBirdBtn = document.getElementById("ref_bird");
+		const refLimeBtn = document.getElementById("ref_lime");
+		const refRollBtn = document.getElementById("ref_roll");
+		refBirdBtn.addEventListener("click", function(e){
+			refresh("bird")
+		});
+		refLimeBtn.addEventListener("click", function(e){
+			refresh("lime")
+		});
+		refRollBtn.addEventListener("click", function(e){
+			refresh("roll")
+		})
+
+		// Output Txt
+		const lime_data = document.getElementById("lime_data");
+		const bird_data = document.getElementById("bird_data");
+		const roll_data = document.getElementById("roll_data");
+
+/* 		limeBndTgl.addEventListener("change", function() {			
+			limeBoundary.visible = limeBndTgl.checked;
+		});
+		birdBndTgl.addEventListener("change", function() {
+			birdBoundary.visible = birdBndTgl.checked;
+		}); */
+
+		view.when(function(){
+			birdBoundary.load().then(fl => {
+				return birdBoundary.queryFeatures().then(results => {
+					birdBndGeom = results.features[0].geometry;
+					load("bird")
+					return;
+				});			
+			});
+
+			limeBoundary.queryFeatures()
+				.then(results => {
+					limeBndGeom = results.features[0].geometry;
+					load("lime")
+					return limeBndGeom
+				});		
+
+			rollBoundary.queryFeatures()
+				.then(results => {
+					rollBndGeom = results.features[0].geometry;
+					load("roll")
+					return rollBndGeom
+				});	
+		}, function(error){
+		// This function will execute if the promise is rejected due to an error
+		});
+
+
+
+		function load(source){
+			var url;
+			if (source == 'lime') {
+				url = proxyurl + LIME
+			}
+			if (source == 'bird') { 
+				url = BIRD
+			}
+			if (source == 'roll'){
+				url = ROLL
+			}
+
+			fetch(url)
+			.then(function(res) {
+				console.log("fetched ", url)
+				if (res.status === 200){
+					return res.json();
+				}
+				else {
+					throw new Error(res.statusText)
+				}	  
+			})
+			.then(function (data){
+				draw(data, source)
+			//}).catch(error => alert(error)
+			}).catch(function(e) {
+				alert(e);
+				lime_data.innerHTML = "Lime data failed to load due to proxy issue";
+			});
+
+		}
+		var countdownNum = 30;
+		function incTimer(tip){
+			setTimeout (function(){
+				if(countdownNum != 0){
+					countdownNum--;
+					tip.innerHTML = countdownNum;					
+					incTimer(tip);
+				} else {
+					tip.innerHTML = 'Refresh data';
+				}
+			},1000);
+        }
+
+		function refresh(source){
+			if (source =='lime'){
+				
+				limeLayer.queryFeatures().then(function (results) {
+					refLimeBtn.disabled = true
+					lime_data.innerHTML = "";	
+					const clearLayer = {deleteFeatures: results.features}
+					tip = document.getElementById("lime_tip")
+					setTimeout(function() {						
+						refLimeBtn.disabled = false;
+						}, 30000);
+						incTimer(tip);
+					return applyEditsToLayer(limeLayer, clearLayer)
+					//view.map.layers.remove(limeLayer);
+				})
+				.catch(function (error){
+					console.log(error);
+				});
+				
+			} 
+			if (source == "bird") {
+				birdLayer.queryFeatures().then(function (results) {
+					refBirdBtn.disabled = true;
+					bird_data.innerHTML = "";
+					const clearLayer = {deleteFeatures: results.features}
+					tip = document.getElementById("bird_tip")
+					setTimeout(function() {						
+						refBirdBtn.disabled = false;
+						}, 30000);
+						incTimer(tip);
+					return applyEditsToLayer(birdLayer, clearLayer)
+				})
+				.catch(function (error){
+					console.log(error);
+				});				
+			}
+			if (source == "roll"){
+				rollLayer.queryFeatures().then(function (results) {
+					refRollBtn.disabled = true;
+					roll_data.innerHTML = "";
+					const clearLayer = {deleteFeatures: results.features}
+					tip = document.getElementById("roll_tip")
+					setTimeout(function() {						
+						refRollBtn.disabled = false;
+						}, 30000);
+						incTimer(tip);
+					return applyEditsToLayer(rollLayer, clearLayer)
+				})
+				.catch(function (error){
+					console.log(error);
+				});	
+			}
+
+			load(source)
+		}
+
+		function toggle(source){			
+
+			if (source =='lime'){
+				if (addLimeBtn.innerHTML.indexOf('Hide') >= 0){
+					addLimeBtn.innerHTML = "Show <br> Lime";
+					limeLayer.visible = false;					
+					refLimeBtn.disabled = true;
+					limeBoundary.visible = false;
+				}	
+				else {
+					limeLayer.visible = true;
+					addLimeBtn.innerHTML = "Hide <br> Lime";
+					refLimeBtn.disabled = false;	
+					limeBoundary.visible = true;
+				}		
+			}
+			if (source =="bird") { //bird
+				if (addBirdBtn.innerHTML.indexOf('Hide') >= 0){
+					addBirdBtn.innerHTML = "Show <br> Bird";
+					birdLayer.visible = false;	
+					refBirdBtn.disabled = true;		
+					birdBoundary.visible = false;		
+				}	
+				else {
+					addBirdBtn.innerHTML = "Hide <br> Bird";
+					birdLayer.visible = true;					
+					refBirdBtn.disabled = false;
+					birdBoundary.visible = true;
+				}	
+			}	
+			if (source =="roll") { //roll
+				if (addRollBtn.innerHTML.indexOf('Hide') >= 0){
+					addRollBtn.innerHTML = "Show <br> Roll";
+					rollLayer.visible = false;	
+					refRollBtn.disabled = true;		
+					rollBoundary.visible = false;		
+				}	
+				else {
+					addRollBtn.innerHTML = "Hide <br> Roll";
+					rollLayer.visible = true;					
+					refRollBtn.disabled = false;
+					rollBoundary.visible = true;
+				}	
+			}		
+		}
+
+		function updateText(divAppend, res, dis, tot, oob){
+
+			var datetime = new Date().toLocaleDateString() + " @ " + new Date().toLocaleTimeString();
+			template = document.getElementById("datatemplate")
+			template.content.getElementById("reserved").innerHTML = res;
+			template.content.getElementById("disabled").innerHTML = dis;
+			template.content.getElementById("total").innerHTML = tot;
+			template.content.getElementById("oob").innerHTML = oob;
+			template.content.getElementById("update").innerHTML = datetime;
+			var clone = document.importNode(template.content, true); 
+			divAppend.appendChild(clone);
+
+		}
+
+		function draw(d, source){
+
+			if (source =="roll"){
+				var data = d['bikes'];
+			}
+			else {
+				if (d['data']['bikes'])	{	
+					var data = d['data']['bikes'];
+				}
+				else { alert("problem reading scppoter data") }
+			}
+
+			
+			var graphics = [];
+			var graphic;
+			var disabled = 0;
+			var reserved = 0;  
+			for (var i = 0; i < data.length; i++) {
+				if (data[i].is_reserved == 1){
+					reserved += 1;
+				}
+				if (data[i].is_disabled == 1){
+					disabled += 1;
+				} 
+				
+				graphic = new Graphic({
+					geometry: {
+						type: "point",
+						latitude: data[i].lat,
+						longitude: data[i].lon
+					},
+					attributes: data[i]
+				});
+				graphics.push(graphic);
+			}
+			const addEdits = {
+				addFeatures: graphics
+			};
+			
+			//let infotxt = "Reserved: " + reserved + " Disabled:" + disabled + " Total:" + data.length;
+			if (source == "bird"){
+				if (!birdBndGeom || birdBndGeom == undefined){
+					birdBoundary.queryFeatures()
+						.then(results => {
+							birdBndGeom = results.features[0].geometry;
+							return birdBndGeom
+						});
+				}
+				applyEditsToLayer(birdLayer, addEdits, birdBndGeom)
+				.then(function (r){					
+					//bird_data.innerHTML = infotxt + " Out of bounds: " + r;
+					updateText(bird_data, reserved, disabled, data.length, r)
+				});						
+			}
+			if (source == "lime") { //lime
+				if (!limeBndGeom || limeBndGeom == undefined){
+					limeBoundary.queryFeatures()
+						.then(results => {
+							limeBndGeom = results.features[0].geometry;
+							return limeBndGeom
+						});
+				}
+				applyEditsToLayer(limeLayer, addEdits, limeBndGeom)
+				.then(function (r){					
+					//lime_data.innerHTML = infotxt + " Out of bounds: " + r;
+					updateText(lime_data, reserved, disabled, data.length, r)
+				});	
+			}
+			if (source == "roll") { //roll
+				if (!rollBndGeom || rollBndGeom == undefined){
+					rollBoundary.queryFeatures()
+						.then(results => {
+							rollBndGeom = results.features[0].geometry;
+							return rollBndGeom
+						});
+				}
+				applyEditsToLayer(rollLayer, addEdits, rollBndGeom)
+				.then(function (r){					
+					updateText(roll_data, reserved, disabled, data.length, r)
+				});	
+			}		
+		}
+		
+		function applyEditsToLayer(lyr, edits, boundary) {
+			console.log("starting apply function");
+          return lyr
+            .applyEdits(edits)
+            .then(function (results) {
+              // if edits were removed
+              if (results.deleteFeatureResults.length > 0) {
+                console.log(results.deleteFeatureResults.length, "features have been removed");
+              }
+              // if features were added - call queryFeatures to return newly added graphics
+              if (results.addFeatureResults.length > 0) {
+                var objectIds = [];
+                results.addFeatureResults.forEach(function (item) {
+                  objectIds.push(item.objectId);
+				});
+				
+				var totalscooters;
+                // query the newly added features from the layer
+                return lyr
+                  .queryFeatures({
+                    objectIds: objectIds
+                  })
+                  .then(function (results) {
+					//console.log(results.features.length, "features have been added.");
+					totalscooters = results.features.length;
+					return outsideBoundary(lyr, boundary)
+					.then(function(results){
+						var outofbounds = totalscooters - results.features.length
+						//console.log("OUT OF BOUNDS: ", outofbounds)
+						return outofbounds;
+					})	 
+				  })
+			  }
+			})
+            .catch(function (error) {
+			  console.log(error);
+			});			
+		}
+
+		function outsideBoundary(scooterLyr, boundryLyr){
+			var query = scooterLyr.createQuery();
+			query.geometry = boundryLyr; //boundryLyr[0].geometry; //boundryLyr;			
+			query.spatialRelationship = "intersects";
+			query.returnGeometry = false;
+			return scooterLyr.queryFeatures(query);
+		}
+
+      });
+    </script>
+  </head>
+
+
+  <body>
+	<div id="viewDiv"></div>
+	<div id="actions" class="esri-widget">
+		<div>
+			Lime, Bird and Roll scooters across the City of Ottawa. Data is loaded from the respetive General Bike Feed Specification (GBFS), as found on the <a href="https://open.ottawa.ca/datasets/e-scooters-availability" target="_blank">Open Ottawa E-Scooter availability</a>.
+		</div>
+
+		<div> <hr width="40%"></div>
+
+		<!-- LIME -->
+		<div id='btns'>			
+			<button class="esri-button" id="add_lime">Show <br> Lime</button> 
+			<div class="refresh-time">
+				<p class="tip" id="lime_tip">Refresh data</p>
+				<button class="esri-button--secondary" id="ref_lime" disabled style="width: 30px; height: 30px;">
+					<span class="font-size-3 esri-icon-refresh" aria-label="refresh icon"></span>
+				</button> 	
+			</div>	
+			<!-- <span id="bnd_chk"><input type="checkbox" id="limeBndTgl" /> Boundary</span> -->
+			<img src="img/lime.png" height="48px"> 
+		</div>
+		<div id='lime_data'> <!--to be filled by template--> </div>
+
+		<div><p></p></div>
+
+		<!-- BIRD -->
+		<div id='btns'>			
+			<button class="esri-button" id="add_bird">Show <br> Bird</button>	
+			<div class="refresh-time">
+				<p class="tip" id="bird_tip">Refresh data</p>
+				<button class="esri-button--secondary" id="ref_bird" disabled style="width: 30px; height: 30px;">
+					<span class="font-size-3 esri-icon-refresh" aria-label="refresh icon"></span>
+				</button>	
+			</div>
+			<!-- <span id="bnd_chk"><input type="checkbox" id="birdBndTgl" /> Boundary</span> -->
+			<img src="img/bird.png" height="48px">
+		</div>
+		<div id='bird_data'><!--to be filled by template-->  </div>	
+
+		<div><p></p></div>
+
+		<!-- ROLL -->
+		<div id='btns'>			
+			<button class="esri-button" id="add_roll">Show <br> Roll</button>	
+			<div class="refresh-time">
+				<p class="tip" id="roll_tip">Refresh data</p>
+				<button class="esri-button--secondary" id="ref_roll" disabled style="width: 30px; height: 30px;">
+					<span class="font-size-3 esri-icon-refresh" aria-label="refresh icon"></span>
+				</button>	
+			</div>
+			<!-- <span id="bnd_chk"><input type="checkbox" id="birdBndTgl" /> Boundary</span> -->
+			<img src="img/roll.png" height="48px">
+		</div>
+		<div id='roll_data'> <!--to be filled by template-->  </div>	
+
+		<div> <hr width="40%"></div>
+		
+		<div id="info"><p>Boundaries digitized from <A href="https://ottawa.ca/en/parking-roads-and-travel/cycling/e-scooters" target="_blank">City of Ottawa E-Scooter</A> website and might not be exactly correct. <br>
+			 Refresh limited to once every 30 seconds. <br>
+			 Lime data may fail to load as it needs to be proxied through a free public service. 
+			</p>
+		</div>
+	</div>
+
+	<template id="datatemplate">
+		<div>Total #: <span id="total"> </span></div>
+		<div>Reserved: <span id="reserved"> </span> </div>
+		<div>Disabled: <span id="disabled"> </span></div>		
+		<div>Outside Deployment: <span id="oob"> </span></div>
+		<div>Update Time: <span id="update"> </span></div>
+	</template>
+
+  </body>
+</html>
